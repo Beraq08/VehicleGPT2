@@ -1,49 +1,46 @@
 import streamlit as st
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import GPT2LMHeadModel, GPT2Tokenizer
 import torch
 
-# Sayfa başlığı
-st.set_page_config(page_title="Araç Chatbot", page_icon="🚗")
-st.title("🚗 Araç Chatbot")
-st.write("Araçlarla ilgili sorularınızı GPT-2 ile cevaplıyorum!")
-
+# Modeli ve tokenizer'ı yükle
 @st.cache_resource
 def load_model():
-    model_id = "BeratCan08/VehicleGPT2"  # Hugging Face model linkin
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
-    model = AutoModelForCausalLM.from_pretrained(model_id)
-    model.eval()
-    return tokenizer, model
+    model = GPT2LMHeadModel.from_pretrained("BeratCan08/VehicleGPT2")
+    tokenizer = GPT2Tokenizer.from_pretrained("BeratCan08/VehicleGPT2")
+    return model, tokenizer
 
-tokenizer, model = load_model()
+model, tokenizer = load_model()
+
+# Streamlit arayüzü
+st.title("🚗 Vehicle Chatbot")
+st.write("Araçlarla ilgili sorularınızı sorun!")
 
 if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+    st.session_state.chat_history = ""
 
-user_input = st.text_input("Soru:", "")
+user_input = st.text_input("Siz:", key="input")
 
-if st.button("Gönder") and user_input:
-    input_ids = tokenizer.encode(user_input + tokenizer.eos_token, return_tensors="pt")
+if user_input:
+    prompt = st.session_state.chat_history + f"User: {user_input}\nBot:"
+    inputs = tokenizer.encode(prompt, return_tensors="pt")
 
-    # ⚠️ attention_mask ekleniyor
-    attention_mask = torch.ones_like(input_ids)
+    attention_mask = torch.ones(inputs.shape, dtype=torch.long)  # Uyarı için maske ekliyoruz
 
-    with torch.no_grad():
-        output = model.generate(
-            input_ids=input_ids,
-            attention_mask=attention_mask,  # ✅ uyarıyı önler
-            max_length=150,
-            do_sample=True,
-            top_p=0.95,
-            top_k=50,
-            pad_token_id=tokenizer.eos_token_id  # GPT-2'nin pad token'ı
-        )
+    outputs = model.generate(
+        inputs,
+        attention_mask=attention_mask,
+        max_length=inputs.shape[1] + 50,
+        pad_token_id=tokenizer.eos_token_id,
+        do_sample=True,
+        top_k=50,
+        top_p=0.95,
+        temperature=0.8,
+        num_return_sequences=1
+    )
 
-    response = tokenizer.decode(output[:, input_ids.shape[-1]:][0], skip_special_tokens=True)
+    output_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    response = output_text[len(prompt):].strip().split("\n")[0]
 
-    st.session_state.chat_history.append(("Sen", user_input))
-    st.session_state.chat_history.append(("Bot", response))
+    st.session_state.chat_history += f"User: {user_input}\nBot: {response}\n"
+    st.text_area("Sohbet:", st.session_state.chat_history, height=300)
 
-# Geçmişi göster
-for role, msg in st.session_state.chat_history:
-    st.markdown(f"**{role}:** {msg}")
